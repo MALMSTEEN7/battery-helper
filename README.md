@@ -5,7 +5,7 @@ Herramienta web de un solo archivo (`index.html`) para diseñar y armar bancos d
 ## Qué hace
 
 **Diseño del banco**
-- Coloca celdas en una rejilla (normal o en panal) y elige qué polo va arriba.
+- Coloca celdas en cuadrícula, en panal (triangular) o en forma libre moviendo cada fila media celda, y elige qué polo va arriba.
 - Dibuja las tiras de níquel en la cara superior e inferior.
 - Calcula automáticamente la configuración (S y P), voltajes, capacidad, energía y corriente máxima.
 - Detecta cortos, celdas sueltas y grupos desbalanceados.

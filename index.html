@@ -109,6 +109,10 @@ svg.board{display:block;margin:0 auto;touch-action:manipulation;user-select:none
 .tag.bp rect{fill:var(--pos)} .tag.bp text{fill:var(--pos-ink)}
 .tag.bm rect{fill:var(--neg)} .tag.bm text{fill:var(--neg-ink)}
 
+.rowh{cursor:pointer} .rowh rect{fill:var(--panel);stroke:var(--line);stroke-width:1.2}
+.rowh:hover rect{stroke:var(--accent);stroke-width:2} .rowh text{font:600 11px var(--f-body);fill:var(--ink);text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.hint .acts{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:8px;vertical-align:middle}
+.hint .acts button{padding:3px 10px;border:1px solid var(--line);background:var(--panel)}
 .bmsbox{fill:var(--panel);stroke:var(--line);stroke-width:1.2}
 .pin{fill:var(--empty)} .pin.on{fill:var(--accent)}
 .pint{font:600 8.5px var(--f-mono);fill:var(--muted);text-anchor:middle;pointer-events:none} .pint.on{fill:var(--ink)}
@@ -126,7 +130,7 @@ svg.board{display:block;margin:0 auto;touch-action:manipulation;user-select:none
 .pinlab{font:700 9px var(--f-mono);fill:var(--ink);text-anchor:middle;pointer-events:none}
 .wg.sel .pinlab{font-size:11px}
 .wire-hit{fill:none;stroke:transparent;stroke-width:12;pointer-events:stroke;cursor:pointer}
-.tool-cell .wire-hit,.tool-strip .wire-hit{pointer-events:none}
+.tool-cell .wire-hit,.tool-strip .wire-hit,.tool-shape .wire-hit{pointer-events:none}
 .pin-hit{fill:transparent;cursor:pointer}
 .bpill{pointer-events:none} .bpill rect{fill:var(--wc)} .bpill text{font:700 9.5px var(--f-mono);fill:var(--panel);text-anchor:middle;dominant-baseline:central}
 .selbar{display:inline-flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
@@ -240,6 +244,11 @@ details.card>summary::before{content:"▸";color:var(--muted)} details[open].car
       <button data-tool="bplus" aria-pressed="false">Marcar B+ <kbd>4</kbd></button>
       <button data-tool="bminus" aria-pressed="false">Marcar B− <kbd>5</kbd></button>
       <button data-tool="bms" aria-pressed="false">Cable BMS <kbd>6</kbd></button>
+      <button data-tool="shape" aria-pressed="false">Forma <kbd>7</kbd></button>
+    </div>
+    <div class="seg" role="group" aria-label="Distribución">
+      <button data-layout="grid" aria-pressed="false">Cuadrícula</button>
+      <button data-layout="hex" aria-pressed="false">Panal</button>
     </div>
     <button class="btn" id="autoBms">Auto BMS</button>
     <button class="btn" id="undo">Deshacer <kbd>Ctrl Z</kbd></button>
@@ -286,7 +295,6 @@ details.card>summary::before{content:"▸";color:var(--muted)} details[open].car
         <button class="btn" id="applyGrid">Aplicar</button>
       </div>
       <div class="checks">
-        <label><input type="checkbox" id="stagger"> Filas escalonadas (panal)</label>
         <label><input type="checkbox" id="mirror"> Cara inferior volteada</label>
       </div>
       <h2>Generar plantilla</h2>
@@ -413,6 +421,7 @@ const HINTS={
   erase:'<strong>Borrar:</strong> toca una tira para quitarla, o toca un polo para quitar todas las tiras que llegan a él en esa cara.',
   bplus:'<strong>B+:</strong> toca el polo donde sale el cable positivo del banco.',
   bminus:'<strong>B−:</strong> toca el polo donde sale el cable negativo del banco.',
+  shape:'<strong>Forma:</strong> usa ◀ ▶ a los lados de cada fila para moverla media celda; las filas desplazadas se juntan solas como panal. Toca un hueco para poner o quitar celdas.<span class="acts"><button data-act="row+">+ fila</button><button data-act="row-">− fila</button><button data-act="col+">+ columna</button><button data-act="col-">− columna</button></span>',
   bms:'<strong>Cable BMS:</strong> toca un polo para soldar ahí un cable de balanceo. El número (B0…Bn) se asigna según el punto del banco. Si ese número ya estaba en otro polo, se mueve. Toca el cable otra vez para quitarlo.'
 };
 let S=null, tool='cell', pending=null, hist=[], sel=null;
@@ -422,6 +431,7 @@ function defaults(){return {rows:3,cols:4,stagger:false,mirror:false,cells:[],st
 function generate(s,p,keep){
   const st=Object.assign(defaults(),keep||{});
   st.rows=p; st.cols=s; st.cells=[]; st.strips=[];
+  st.rowOff=Array.from({length:p},(_,r)=>st.hex&&r%2?1:0);delete st.hex;
   const idx=(r,c)=>r*s+c;
   for(let r=0;r<p;r++)for(let c=0;c<s;c++)st.cells.push(c%2===0?'+':'-');
   for(let c=0;c<s;c++)for(let r=0;r<p-1;r++){st.strips.push({f:'top',a:idx(r,c),b:idx(r+1,c)});st.strips.push({f:'bot',a:idx(r,c),b:idx(r+1,c)});}
@@ -439,9 +449,16 @@ const N=()=>S.rows*S.cols;
 function pol(s,f){const c=S.cells[s];if(!c)return null;const top=c==='+'?'p':'n';return f==='top'?top:(top==='p'?'n':'p');}
 function rc(s){return [Math.floor(s/S.cols),s%S.cols];}
 function name(s){const [r,c]=rc(s);return 'F'+(r+1)+'·C'+(c+1);}
-function W(){return PAD*2+S.cols*PITCH+(S.stagger?PITCH/2:0);}
-function H(){const step=S.stagger?PITCH*0.87:PITCH;return PAD*2+(S.rows-1)*step+PITCH;}
-function xy(s,f){const [r,c]=rc(s);const step=S.stagger?PITCH*0.87:PITCH;let x=PAD+c*PITCH+PITCH/2+(S.stagger&&r%2?PITCH/2:0);const y=PAD+r*step+PITCH/2;if(f==='bot'&&S.mirror)x=W()-x;return [x,y];}
+const PADX=()=>PAD+(tool==='shape'?32:0);
+function offs(){if(!S.rowOff||S.rowOff.length!==S.rows){const o=S.rowOff||[];S.rowOff=Array.from({length:S.rows},(_,r)=>o[r]!=null?o[r]:(S.stagger&&r%2?1:0));S.stagger=false;}return S.rowOff;}
+const isHex=()=>offs().some(v=>Math.abs(v)%2===1);
+function rowStep(r){const o=offs();const d=(Math.abs(o[r]-o[r-1])/2)%1;const dx=Math.min(d,1-d);return Math.sqrt(1-dx*dx);}
+function rowY(r){let y=PAD+PITCH/2;for(let i=1;i<=r;i++)y+=PITCH*rowStep(i);return y;}
+function W(){const o=offs();return PADX()*2+(S.cols+(Math.max(...o)-Math.min(...o))/2)*PITCH;}
+function H(){return rowY(S.rows-1)+PITCH/2+PAD;}
+function xy(s,f){const [r,c]=rc(s);const o=offs();let x=PADX()+(c+(o[r]-Math.min(...o))/2)*PITCH+PITCH/2;const y=rowY(r);if(f==='bot'&&S.mirror)x=W()-x;return [x,y];}
+function shiftRow(r,d){snap();const o=offs();o[r]=Math.max(-2*S.cols,Math.min(2*S.cols,o[r]+d));const m=Math.min(...o);for(let i=0;i<o.length;i++)o[i]-=m;render();}
+function setLayout(k){snap();S.rowOff=Array.from({length:S.rows},(_,r)=>k==='hex'&&r%2?1:0);render();}
 const hue=g=>Math.round(((g-1)*137.508+205)%360);
 
 function analyze(){
@@ -529,6 +546,8 @@ function svgFace(f,A){
         o+=`<g class="bpill"><rect x="${x-tw/2}" y="${ty-R-20}" width="${tw}" height="17" rx="4"/><text x="${x}" y="${ty-R-11.5}">B${q.n} · ${v}</text></g>`;}
       o+=`</g>`;}
     if(!list.length)o+=`<text class="pinlab" x="${w/2}" y="${by+19}" style="opacity:.6">Sin cables en esta cara</text>`;}
+  if(tool==='shape'&&f==='top')for(let r=0;r<S.rows;r++){const y=rowY(r);
+    o+=`<g class="rowh" data-row="${r}" data-d="-1"><rect x="4" y="${y-13}" width="26" height="26" rx="6"/><text x="17" y="${y}">◀</text></g><g class="rowh" data-row="${r}" data-d="1"><rect x="${w-30}" y="${y-13}" width="26" height="26" rx="6"/><text x="${w-17}" y="${y}">▶</text></g>`;}
   if(pending&&pending.f===f){const [x,y]=xy(pending.s,f);o+=`<circle class="pend" cx="${x}" cy="${y}" r="${R+4}"/>`;}
   const el=document.getElementById('svg-'+f);el.setAttribute('viewBox',`0 0 ${w} ${h}`);el.style.maxWidth=(w*(UI.edit?2.6:1.4))+'px';el.style.minWidth=Math.min(w,w*0.55)+'px';el.innerHTML=o;
 }
@@ -605,12 +624,14 @@ function render(){
   else hint.innerHTML=HINTS[tool];
   document.getElementById('botLbl').textContent=S.mirror?'volteada (como la ves al girar el banco)':'vista a través desde arriba';
   document.querySelectorAll('[data-tool]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.tool===tool));
+  {const o=offs(),d=o.length>1?o[1]-o[0]:1,lay=o.every(v=>v===o[0])?'grid':(Math.abs(d)===1&&o.every((v,r)=>v-o[0]===(r%2?d:0)))?'hex':'';
+   document.querySelectorAll('[data-layout]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.layout===lay));}
   save();
 }
 
 function removeStripsAt(s,f){S.strips=S.strips.filter(t=>!((t.a===s||t.b===s)&&(f==null||t.f===f)));}
 function clickSlot(s,f){
-  if(tool==='cell'){snap();const c=S.cells[s];
+  if(tool==='cell'||tool==='shape'){snap();const c=S.cells[s];
     if(!c)S.cells[s]='+';else if(c==='+')S.cells[s]='-';else{S.cells[s]=null;removeStripsAt(s,null);S.bms=S.bms.filter(q=>q.s!==s);if(S.ids)S.ids[s]=null;if(S.bp&&S.bp.s===s)S.bp=null;if(S.bm&&S.bm.s===s)S.bm=null;}
     pending=null;}
   else if(tool==='strip'){if(!S.cells[s])return;
@@ -630,7 +651,8 @@ function clickSlot(s,f){
 }
 function delSel(){if(sel==null)return;snap();S.bms=S.bms.filter(q=>q.n!==sel);sel=null;render();}
 document.getElementById('bmsWrap').addEventListener('click',e=>{const tr=e.target.closest('tr[data-wire]');if(tr){const n=+tr.dataset.wire;sel=sel===n?null:n;render();}});
-function onBoard(e){const wh=e.target.closest('[data-wire]');
+function onBoard(e){const rh=e.target.closest('[data-row]');if(rh){shiftRow(+rh.dataset.row,+rh.dataset.d);return;}
+  const wh=e.target.closest('[data-wire]');
   if(wh){const n=+wh.dataset.wire;sel=sel===n?null:n;render();return;}
   if(sel!=null&&!e.target.closest('[data-s]')&&!e.target.closest('[data-strip]')){sel=null;render();return;}
   const st=e.target.closest('[data-strip]');
@@ -652,7 +674,7 @@ document.getElementById('autoBms2').addEventListener('click',autoBms);
 document.getElementById('clearBms').addEventListener('click',()=>{snap();S.bms=[];render();});
 document.getElementById('clearAll').addEventListener('click',()=>{snap();S.cells=Array(N()).fill(null);S.strips=[];S.bms=[];S.bp=null;S.bm=null;pending=null;render();});
 window.addEventListener('taller:pack',e=>{const d=e.detail;snap();
-  const keep={cap:d.cap||S.cap,vnom:S.vnom,vmax:S.vmax,vmin:S.vmin,imax:S.imax,stagger:S.stagger,mirror:S.mirror};
+  const keep={cap:d.cap||S.cap,vnom:S.vnom,vmax:S.vmax,vmin:S.vmin,imax:S.imax,hex:isHex(),mirror:S.mirror};
   S=generate(d.S,d.P,keep);S.ids=Array(N()).fill(null);
   d.groups.forEach((g,k)=>{const col=d.S-1-k;g.forEach((id,r)=>{S.ids[r*d.S+col]=id;});});
   document.getElementById('genS').value=d.S;document.getElementById('genP').value=d.P;
@@ -660,7 +682,7 @@ window.addEventListener('taller:pack',e=>{const d=e.detail;snap();
 document.addEventListener('keydown',e=>{if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))return;
   if(document.getElementById('tab-design').hidden)return;
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undo();return;}
-  const m={'1':'cell','2':'strip','3':'erase','4':'bplus','5':'bminus','6':'bms'};if(m[e.key])setTool(m[e.key]);
+  const m={'1':'cell','2':'strip','3':'erase','4':'bplus','5':'bminus','6':'bms','7':'shape'};if(m[e.key])setTool(m[e.key]);
   if(e.key==='e'||e.key==='E'){toggleEdit();return;}
   if((e.key==='Delete'||e.key==='Backspace')&&sel!=null){e.preventDefault();delSel();return;}
   if(e.key==='Escape'&&(pending||sel!=null)){pending=null;sel=null;render();}});
@@ -668,21 +690,24 @@ document.addEventListener('keydown',e=>{if(/^(INPUT|TEXTAREA|SELECT)$/.test(e.ta
 const num=['cap','vnom','vmax','vmin','imax'];
 function syncInputs(){num.forEach(k=>document.getElementById(k).value=S[k]);
   document.getElementById('rows').value=S.rows;document.getElementById('cols').value=S.cols;
-  document.getElementById('stagger').checked=S.stagger;document.getElementById('mirror').checked=S.mirror;}
+  document.getElementById('mirror').checked=S.mirror;}
 num.forEach(k=>document.getElementById(k).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(Number.isFinite(v)&&v>0){S[k]=v;render();}}));
-document.getElementById('stagger').addEventListener('change',e=>{S.stagger=e.target.checked;render();});
 document.getElementById('mirror').addEventListener('change',e=>{S.mirror=e.target.checked;render();});
-document.getElementById('applyGrid').addEventListener('click',()=>{
-  const nr=Math.max(1,Math.min(20,parseInt(document.getElementById('rows').value)||1)), nc=Math.max(1,Math.min(30,parseInt(document.getElementById('cols').value)||1));
-  snap();const map=s=>{const [r,c]=rc(s);return (r<nr&&c<nc)?r*nc+c:null;};
+document.getElementById('applyGrid').addEventListener('click',()=>resizeGrid(parseInt(document.getElementById('rows').value)||1,parseInt(document.getElementById('cols').value)||1));
+document.getElementById('hint').addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act;
+  resizeGrid(S.rows+(a==='row+'?1:a==='row-'?-1:0),S.cols+(a==='col+'?1:a==='col-'?-1:0));});
+document.querySelectorAll('[data-layout]').forEach(b=>b.addEventListener('click',()=>setLayout(b.dataset.layout)));
+function resizeGrid(nr,nc){nr=Math.max(1,Math.min(20,nr|0));nc=Math.max(1,Math.min(30,nc|0));
+  snap();const o0=offs().slice();const ro=[];for(let r=0;r<nr;r++)ro.push(r<o0.length?o0[r]:(r>=2?ro[r-2]:(isHex()&&r%2?1:0)));
+  const map=s=>{const [r,c]=rc(s);return (r<nr&&c<nc)?r*nc+c:null;};
   const cells=Array(nr*nc).fill(null);for(let s=0;s<N();s++){const t=map(s);if(t!=null)cells[t]=S.cells[s]||null;}
   const strips=[];for(const t of S.strips){const a=map(t.a),b=map(t.b);if(a!=null&&b!=null)strips.push({f:t.f,a,b});}
   const mk=m=>{if(!m)return null;const t=map(m.s);return t==null?null:{s:t,f:m.f};};
   if(S.ids){const ids=Array(nr*nc).fill(null);for(let s=0;s<N();s++){const t=map(s);if(t!=null)ids[t]=S.ids[s]||null;}S.ids=ids;}
   const bms=[];for(const q of S.bms){const t=map(q.s);if(t!=null)bms.push({f:q.f,s:t,n:q.n});}S.bms=bms;
-  const bp=mk(S.bp),bm=mk(S.bm);S.rows=nr;S.cols=nc;S.cells=cells;S.strips=strips;S.bp=bp;S.bm=bm;pending=null;syncInputs();render();});
+  const bp=mk(S.bp),bm=mk(S.bm);S.rows=nr;S.cols=nc;S.cells=cells;S.strips=strips;S.bp=bp;S.bm=bm;S.rowOff=ro;pending=null;syncInputs();render();}
 function gen(s,p){s=Math.max(1,Math.min(30,s|0));p=Math.max(1,Math.min(20,p|0));snap();
-  const keep={cap:S.cap,vnom:S.vnom,vmax:S.vmax,vmin:S.vmin,imax:S.imax,stagger:S.stagger,mirror:S.mirror};S=generate(s,p,keep);pending=null;syncInputs();render();}
+  const keep={cap:S.cap,vnom:S.vnom,vmax:S.vmax,vmin:S.vmin,imax:S.imax,hex:isHex(),mirror:S.mirror};S=generate(s,p,keep);pending=null;syncInputs();render();}
 document.getElementById('gen').addEventListener('click',()=>gen(parseInt(document.getElementById('genS').value),parseInt(document.getElementById('genP').value)));
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>{const [s,p]=b.dataset.preset.split(',').map(Number);document.getElementById('genS').value=s;document.getElementById('genP').value=p;gen(s,p);}));
 
