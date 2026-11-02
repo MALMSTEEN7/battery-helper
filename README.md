@@ -10,6 +10,7 @@ Herramienta web de un solo archivo (`index.html`) para diseñar y armar bancos d
 - Calcula automáticamente la configuración (S y P), voltajes, capacidad, energía y corriente máxima.
 - Detecta cortos, celdas sueltas y grupos desbalanceados.
 - Cableado del BMS: asigna B0…Bn a cada polo según su punto en el banco, con colocación automática y tabla de verificación.
+- Conexión de potencia: dibuja el BMS con sus pads B−, P− y C− (puerto común o separado), los cables de B+ y B− hasta las salidas, y un esquema banco → fusible → BMS → controlador y cargador, con calibre de cable, fusible, BMS y cargador recomendados y el orden de conexión.
 - Modo edición a pantalla completa.
 
 **Celdas**

@@ -109,6 +109,24 @@ svg.board{display:block;margin:0 auto;touch-action:manipulation;user-select:none
 .tag.bp rect{fill:var(--pos)} .tag.bp text{fill:var(--pos-ink)}
 .tag.bm rect{fill:var(--neg)} .tag.bm text{fill:var(--neg-ink)}
 
+.pw-o{fill:none;stroke:var(--board);stroke-width:9;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.pw{fill:none;stroke-width:5;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.pw.pos{stroke:var(--pos)} .pw.neg{stroke:var(--wire0)}
+.ppad{fill:var(--nickel);stroke:var(--nickel-edge)}
+.ppl{font:700 7.5px var(--f-mono);fill:var(--nickel-ink);text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.psep{stroke:var(--line);stroke-width:1.2}
+.pterm{pointer-events:none} .pterm rect{fill:var(--panel);stroke-width:2} .pterm.pos rect{stroke:var(--pos)} .pterm.neg rect{stroke:var(--wire0)}
+.pterm text{font:700 9px var(--f-body);fill:var(--ink);text-anchor:middle;dominant-baseline:central}
+.fuse{pointer-events:none} .fuse rect{fill:var(--panel);stroke:var(--pos);stroke-width:1.5} .fuse text{font:700 7.5px var(--f-mono);fill:var(--pos);text-anchor:middle;dominant-baseline:central}
+#powerCard{grid-column:1/-1}
+svg.schem{display:block;width:100%;min-width:600px;max-width:900px;height:auto;margin:0 auto}
+.sc-box{fill:var(--panel);stroke:var(--line);stroke-width:1.5} .sc-bms{fill:var(--panel);stroke:var(--accent);stroke-width:2}
+.sc-t{font:600 12px var(--f-body);fill:var(--ink)} .sc-s{font:500 10.5px var(--f-mono);fill:var(--muted)} .sc-big{font:700 24px var(--f-display);fill:var(--accent)}
+.sc-l{font:700 11px var(--f-mono);fill:var(--ink)}
+.sc-pos{stroke:var(--pos);stroke-width:4;fill:none;stroke-linejoin:round} .sc-neg{stroke:var(--wire0);stroke-width:4;fill:none;stroke-linejoin:round}
+.sc-bal{stroke:var(--muted);stroke-width:2;stroke-dasharray:5 4;fill:none}
+.sc-dot{fill:var(--ink)} .sc-fuse{fill:var(--panel);stroke:var(--pos);stroke-width:2}
+.pw-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:5px;font-size:.9rem;max-width:80ch}
 .bk-list{display:flex;flex-direction:column}
 .bk-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding-block:8px;border-bottom:1px solid var(--line)}
 .bk-row:last-child{border-bottom:0}
@@ -297,6 +315,16 @@ details.card>summary::before{content:"▸";color:var(--muted)} details[open].car
       <div id="bmsWrap"></div>
     </section>
 
+    <section class="card" id="powerCard">
+      <h2>Conexión de potencia</h2>
+      <div class="row">
+        <div class="field" style="flex:0 1 230px"><label for="pw-port">Tipo de BMS</label><select id="pw-port"><option value="common">Puerto común (P−)</option><option value="sep">Puerto separado (P− y C−)</option></select></div>
+        <div class="field" style="width:170px"><label for="pw-iload">Corriente de la carga (A)</label><input type="number" id="pw-iload" min="1" step="1"></div>
+        <div class="checks" style="align-self:center"><label><input type="checkbox" id="pw-fuse"> Fusible en B+</label></div>
+      </div>
+      <div class="scroll"><svg id="pwSvg" class="schem" viewBox="0 0 730 280" role="img" aria-label="Esquema de conexión de potencia"></svg></div>
+      <div id="pwRec" style="display:flex;flex-direction:column;gap:12px"></div>
+    </section>
     <section class="card">
       <h2>Celda</h2>
       <div class="fields">
@@ -518,8 +546,10 @@ function analyze(){
 }
 
 function svgFace(f,A){
-  const ser=A.series, showB=ser>0&&(S.bms.length>0||tool==='bms');
-  const w=Math.max(W(),showB?2*PAD+(ser+1)*26:0),h=H()+(showB?62:0);let o=`<rect class="bg" x="0" y="0" width="${w}" height="${h}" rx="8"/>`;
+  const vM=m=>m&&S.cells[m.s];
+  const ser=A.series, showP=ser>0&&!!(vM(S.bp)||vM(S.bm)), showB=ser>0&&(S.bms.length>0||tool==='bms'||showP);
+  const sep=pwCfg().port==='sep', padsW=showP?(sep?84:60):0, bx1=Math.max(W()-PAD,PAD+(ser+1)*26+16+padsW);
+  const w=showB?Math.max(W(),bx1+(showP?158:PAD)):W(),h=H()+(showB?62:0)+(showP&&sep?18:0);let o=`<rect class="bg" x="0" y="0" width="${w}" height="${h}" rx="8"/>`;
   for(let s=0;s<N();s++){const [x,y]=xy(s,f);o+=`<circle class="gdot" cx="${x}" cy="${y}" r="1.4"/>`;}
   // cuerpos
   for(let s=0;s<N();s++){const [x,y]=xy(s,f);const c=S.cells[s];
@@ -545,15 +575,15 @@ function svgFace(f,A){
   for(const [m,cls,txt] of [[S.bp,'bp','B+'],[S.bm,'bm','B−']]){if(m&&m.f===f&&S.cells[m.s]){const [x,y]=xy(m.s,f);
     o+=`<g class="tag ${cls}"><rect x="${x+6}" y="${y-R-4}" width="24" height="14" rx="3"/><text x="${x+18}" y="${y-R+3}">${txt}</text></g>`;}}
   if(showB){
-    const Wb=W(), Hb=H()-PAD+4, by=H()+16, cw=w-2*PAD;
+    const Wb=W(), Hb=H()-PAD+4, by=H()+16, cw=bx1-PAD;
     const list=S.bms.filter(q=>q.f===f&&S.cells[q.s]).map(q=>{const [x,y]=xy(q.s,f);let gx=x+PITCH/2;if(gx>Wb-PAD+2)gx=x-PITCH/2;
       const L=A.netLevel(A.net(q.s,f));return {q,x,y,gx,bad:L!==q.n||q.n>ser};});
     const byG={};list.forEach(o=>{const k=Math.round(o.gx);(byG[k]=byG[k]||[]).push(o);});
     for(const k in byG){const g=byG[k];g.sort((a,b)=>a.y-b.y||a.x-b.x);g.forEach((o,j)=>o.gx+=(j-(g.length-1)/2)*4);}
     list.sort((a,b)=>a.gx-b.gx);
-    const sp=26,lo=PAD+16,hi=w-PAD-16;list.forEach((o,i)=>o.px=Math.max(o.gx,i?list[i-1].px+sp:lo));
+    const sp=26,lo=PAD+16,hi=bx1-16-padsW;list.forEach((o,i)=>o.px=Math.max(o.gx,i?list[i-1].px+sp:lo));
     for(let i=list.length-1;i>=0;i--)list[i].px=Math.min(list[i].px,i<list.length-1?list[i+1].px-sp:hi);
-    o+=`<rect class="bmsbox" x="${PAD}" y="${by}" width="${cw}" height="30" rx="5"/><text class="bmst" x="${PAD+4}" y="${by+42}">SALIDA DE CABLES AL BMS · ${ser}S · el orden real del conector está en la tabla</text>`;
+    o+=`<rect class="bmsbox" x="${PAD}" y="${by}" width="${cw}" height="30" rx="5"/><text class="bmst" x="${PAD+4}" y="${by+42}">BMS ${ser}S · BALANCE${showP?' Y POTENCIA':''}</text>`;
     const has=sel!=null&&list.some(o=>o.q.n===sel);
     // cables no seleccionados primero, el seleccionado encima
     list.sort((a,b)=>(a.q.n===sel)-(b.q.n===sel));
@@ -569,7 +599,25 @@ function svgFace(f,A){
       if(isSel){const v=fmt(q.n*S.vnom,1)+' V';const tw=44+v.length*5;
         o+=`<g class="bpill"><rect x="${x-tw/2}" y="${ty-R-20}" width="${tw}" height="17" rx="4"/><text x="${x}" y="${ty-R-11.5}">B${q.n} · ${v}</text></g>`;}
       o+=`</g>`;}
-    if(!list.length)o+=`<text class="pinlab" x="${w/2}" y="${by+19}" style="opacity:.6">Sin cables en esta cara</text>`;}
+    if(!list.length)o+=`<text class="pinlab" x="${(PAD+bx1-padsW)/2}" y="${by+19}" style="opacity:.6">Sin cables de balance en esta cara</text>`;
+    if(showP){const pw=pwCfg();
+      const pads=sep?[['B−','bm'],['C−','c'],['P−','p']]:[['B−','bm'],['P−','p']];
+      const px0=bx1-padsW+10,padX={};
+      o+=`<line class="psep" x1="${px0-6}" y1="${by+4}" x2="${px0-6}" y2="${by+26}"/>`;
+      pads.forEach(([l,k],i)=>{const cx=px0+i*24+9;padX[k]=cx;o+=`<rect class="ppad" x="${cx-9}" y="${by+5}" width="18" height="20" rx="3"/><text class="ppl" x="${cx}" y="${by+15}">${l}</text>`;});
+      const tx=bx1+38,tw=108,yPlus=PAD+PITCH/2,yP=by+15,yC=by+46;
+      const term=(y,label,c)=>`<g class="pterm ${c}"><rect x="${tx}" y="${y-11}" width="${tw}" height="22" rx="5"/><text x="${tx+tw/2}" y="${y}">${label}</text></g>`;
+      if(vM(S.bm)&&S.bm.f===f){const [x,y]=xy(S.bm.s,f);let gx=x+PITCH/2;if(gx>Wb-PAD+2)gx=x-PITCH/2;
+        const d=`M${x} ${y-3} L${gx} ${y-3+PITCH*0.47} L${gx} ${Hb} C${gx} ${Hb+12} ${padX.bm} ${by-24} ${padX.bm} ${by-10} L${padX.bm} ${by+5}`;
+        o+=`<path class="pw-o" d="${d}"/><path class="pw neg" d="${d}"/>`;}
+      if(vM(S.bp)&&S.bp.f===f){const [x,y]=xy(S.bp.s,f);const lx=tx-14;
+        const d=`M${x} ${y-3} L${x} 9 L${lx} 9 L${lx} ${yPlus} L${tx} ${yPlus}`;
+        o+=`<path class="pw-o" d="${d}"/><path class="pw pos" d="${d}"/>`;
+        if(pw.fuse){const fy=Math.max(14,(9+yPlus)/2-11);o+=`<g class="fuse"><rect x="${lx-8}" y="${fy}" width="16" height="22" rx="3"/><text x="${lx}" y="${fy+11}">F</text></g>`;}
+        o+=term(yPlus,'+ salida y carga','pos');}
+      o+=`<path class="pw-o" d="M${padX.p+9} ${yP} L${tx} ${yP}"/><path class="pw neg" d="M${padX.p+9} ${yP} L${tx} ${yP}"/>`+term(yP,sep?'− salida (P−)':'− salida y carga','neg');
+      if(sep){const d=`M${padX.c} ${by+25} L${padX.c} ${yC} L${tx} ${yC}`;o+=`<path class="pw-o" d="${d}"/><path class="pw neg" d="${d}"/>`+term(yC,'− carga (C−)','neg');}
+    }}
   if(tool==='shape'&&f==='top')for(let r=0;r<S.rows;r++){const y=rowY(r);
     o+=`<g class="rowh" data-row="${r}" data-d="-1"><rect x="4" y="${y-13}" width="26" height="26" rx="6"/><text x="17" y="${y}">◀</text></g><g class="rowh" data-row="${r}" data-d="1"><rect x="${w-30}" y="${y-13}" width="26" height="26" rx="6"/><text x="${w-17}" y="${y}">▶</text></g>`;}
   if(pending&&pending.f===f){const [x,y]=xy(pending.s,f);o+=`<circle class="pend" cx="${x}" cy="${y}" r="${R+4}"/>`;}
@@ -621,6 +669,62 @@ function renderInfo(A){
   else bw.innerHTML='<p class="note">Arma un banco válido para ver qué cables necesita el BMS.</p>';
 }
 
+function pwCfg(){if(!S.pw||typeof S.pw!=='object')S.pw={port:'common',fuse:true,iload:null};return S.pw;}
+function renderPower(A){
+  const pw=pwCfg(),ser=A.series,cnt=A.counts,pMin=cnt.length?Math.min(...cnt):0,pMax=cnt.length?Math.max(...cnt):0;
+  const $p=id=>document.getElementById(id),svg=$p('pwSvg'),rec=$p('pwRec');
+  $p('pw-port').value=pw.port;$p('pw-fuse').checked=!!pw.fuse;
+  const packI=pMin*S.imax;
+  if(document.activeElement!==$p('pw-iload')){$p('pw-iload').value=pw.iload||'';$p('pw-iload').placeholder=packI?String(Math.round(packI)):'';}
+  if(!ser){svg.innerHTML=`<text class="sc-t" x="365" y="140" text-anchor="middle">Arma un banco válido para ver la conexión de potencia.</text>`;rec.innerHTML='';return;}
+  const I=pw.iload||packI,ah=pMin*S.cap/1000,sep=pw.port==='sep';
+  const awg=I<=7?18:I<=10?16:I<=15?14:I<=25?12:I<=35?10:I<=50?8:6;
+  const fz=[3,5,7.5,10,15,20,25,30,35,40,50,60,70,80,100,125,150,200].find(v=>v>=I*1.25)||Math.ceil(I*1.25);
+  const bmsA=[10,15,20,25,30,40,50,60,80,100,120,150,200].find(v=>v>=I*1.2)||Math.ceil(I*1.2);
+  const vx=ser*S.vmax,vn=ser*S.vnom,chgA=Math.max(0.5,Math.round(ah*0.5*2)/2);
+  const cfg=pMin===pMax?`${ser}S${pMax}P`:`${ser}S ${pMin}–${pMax}P`;
+  const T=(x,y,t,c,a)=>`<text class="${c}" x="${x}" y="${y}"${a?` text-anchor="${a}"`:''} dominant-baseline="central">${t}</text>`;
+  const term=(x,y)=>`<circle class="sc-dot" cx="${x}" cy="${y}" r="4"/>`;
+  let o='';
+  // cajas
+  o+=`<rect class="sc-box" x="20" y="35" width="160" height="215" rx="10"/>`+T(100,58,'BANCO','sc-t','middle')+T(100,92,cfg,'sc-big','middle')+
+     T(100,120,`${fmt(vn,1)} V nominal`,'sc-s','middle')+T(100,136,`${fmt(vx,1)} V cargado`,'sc-s','middle')+T(100,152,`${fmt(ah,2)} Ah`,'sc-s','middle')+
+     T(170,62,'B+','sc-l','end')+T(170,180,'balance','sc-s','end')+T(170,225,'B−','sc-l','end');
+  o+=`<rect class="sc-bms" x="300" y="140" width="140" height="110" rx="10"/>`+T(370,195,`BMS ${ser}S`,'sc-t','middle')+T(370,212,`≥ ${bmsA} A`,'sc-s','middle')+
+     T(308,160,'balance','sc-s','start')+T(308,225,'B−','sc-l','start')+T(432,170,'P−','sc-l','end')+(sep?T(432,228,'C−','sc-l','end'):'');
+  o+=`<rect class="sc-box" x="560" y="35" width="150" height="85" rx="10"/>`+T(640,64,'CONTROLADOR','sc-t','middle')+T(640,82,`o carga · ${fmt(I,0)} A`,'sc-s','middle')+T(572,62,'+','sc-l','start')+T(572,100,'−','sc-l','start');
+  o+=`<rect class="sc-box" x="560" y="170" width="150" height="85" rx="10"/>`+T(640,200,'CARGADOR','sc-t','middle')+T(640,218,`${fmt(vx,1)} V · ${fmt(chgA,1)} A`,'sc-s','middle')+T(572,197,'+','sc-l','start')+T(572,235,'−','sc-l','start');
+  // cables
+  o+=`<path class="sc-pos" d="M180 62 H560"/><path class="sc-pos" d="M520 62 V197 H560"/>`;
+  if(pw.fuse)o+=`<rect class="sc-fuse" x="222" y="53" width="46" height="18" rx="4"/>`+T(245,62,`${fmt(fz,fz%1?1:0)} A`,'sc-l','middle')+T(245,42,'fusible','sc-s','middle');
+  o+=T(400,50,`AWG ${awg}`,'sc-s','middle');
+  o+=`<path class="sc-neg" d="M180 225 H300"/>`+T(240,240,`AWG ${awg}`,'sc-s','middle');
+  o+=`<path class="sc-bal" d="M180 175 H300"/>`+T(240,165,`${ser+1} cables`,'sc-s','middle');
+  o+=`<path class="sc-neg" d="M440 170 H490 V100 H514 A6 6 0 0 1 526 100 H560"/>`;
+  if(sep)o+=`<path class="sc-neg" d="M440 228 H500 V235 H560"/>`;
+  else o+=`<path class="sc-neg" d="M490 170 V235 H560"/>`+term(490,170);
+  o+=term(520,62)+term(180,62)+term(180,225)+term(300,225)+term(440,170)+term(560,62)+term(560,100)+term(560,197)+term(560,235)+(sep?term(440,228):'');
+  svg.innerHTML=o;
+  // recomendaciones
+  const n=[];
+  if(!(S.bp&&S.cells[S.bp.s])||!(S.bm&&S.cells[S.bm.s]))n.push(['info','Marca B+ y B− en el banco para ver los cables de potencia en el dibujo.']);
+  if(pw.iload&&packI&&pw.iload>packI)n.push(['err',`La carga pide ${fmt(pw.iload,0)} A y el banco da ${fmt(packI,0)} A continuos (${pMin} celdas × ${fmt(S.imax,1)} A). Sube el paralelo o usa celdas de más corriente.`]);
+  n.push(['ok',`BMS ${ser}S para Li-ion de 3,6–3,7 V por celda (no LiFePO4), ${sep?'de puerto separado':'de puerto común'}, de al menos ${bmsA} A continuos.`]);
+  n.push(pw.fuse?['ok',`Fusible de ${fmt(fz,fz%1?1:0)} A en el cable B+, lo más cerca posible del banco.`]:['warn','Sin fusible: el BMS solo corta el negativo, así que un corto en el cable B+ no tiene protección.']);
+  n.push(['info',`Cable de potencia de silicona AWG ${awg} para ${fmt(I,0)} A en B+, B− y P−${sep?'; el C− puede ser más delgado si cargas a menos de 5 A':''}. Balance: AWG 22–24.`]);
+  n.push(['info',`Cargador CC/CV de ${fmt(vx,1)} V y hasta ${fmt(chgA,1)} A (0,5 C)${sep?', conectado entre B+ y C−':', al mismo conector de salida'}.`]);
+  rec.innerHTML=`<ul class="status">${n.map(([k,t])=>`<li><span class="pill ${k}">${{ok:'usa',warn:'ojo',err:'error',info:'nota'}[k]}</span><span>${t}</span></li>`).join('')}</ul>
+   <div><h3>Orden de conexión</h3><ol class="pw-steps">
+    <li>Suelda los cables de potencia al B+ y B− del banco sin el BMS conectado, con las puntas aisladas.</li>
+    <li>Suelda el arnés de balance y mide cada cable respecto a B0 antes de enchufarlo; la tabla del Análisis dice cuánto debe marcar.</li>
+    <li>Conecta el B− del BMS al B− del banco.</li>
+    <li>Enchufa el conector de balance en el BMS siguiendo el orden de su manual; la mayoría pide empezar por B0.</li>
+    <li>Conecta P−${sep?' al controlador y C− al puerto de carga':' al controlador y al puerto de carga'}, y el B+${pw.fuse?' (con el fusible)':''} al positivo de ambos.</li>
+    <li>Entre B+ y P− debe salir el voltaje del banco (${fmt(vn,1)} V nominal). Algunos BMS necesitan conectar el cargador una vez para activarse.</li>
+   </ol></div>`;
+}
+['pw-port','pw-fuse'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{const pw=pwCfg();pw.port=document.getElementById('pw-port').value;pw.fuse=document.getElementById('pw-fuse').checked;render();}));
+document.getElementById('pw-iload').addEventListener('input',e=>{const v=parseFloat(e.target.value);pwCfg().iload=Number.isFinite(v)&&v>0?v:null;render();});
 function autoBms(){const A=analyze();const ser=A.series;if(!ser)return;snap();const out=[];
   const okAt=(m,L)=>m&&S.cells[m.s]&&A.netLevel(A.net(m.s,m.f))===L;
   for(let L=0;L<=ser;L++){
@@ -634,7 +738,7 @@ function autoBms(){const A=analyze();const ser=A.series;if(!ser)return;snap();co
 
 function render(){
   if(sel!=null&&!S.bms.some(q=>q.n===sel&&S.cells[q.s]))sel=null;
-  const A=analyze();svgFace('top',A);svgFace('bot',A);renderInfo(A);
+  const A=analyze();svgFace('top',A);svgFace('bot',A);renderInfo(A);renderPower(A);
   document.getElementById('app').className='wrap tool-'+tool+(UI.edit?' edit view-'+UI.view:'');
   const eb=document.getElementById('editBtn');eb.setAttribute('aria-pressed',UI.edit);eb.innerHTML=(UI.edit?'Salir de edición':'Modo edición')+' <kbd>E</kbd>';
   document.getElementById('viewSeg').hidden=!UI.edit;
