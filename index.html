@@ -109,6 +109,13 @@ svg.board{display:block;margin:0 auto;touch-action:manipulation;user-select:none
 .tag.bp rect{fill:var(--pos)} .tag.bp text{fill:var(--pos-ink)}
 .tag.bm rect{fill:var(--neg)} .tag.bm text{fill:var(--neg-ink)}
 
+.bk-list{display:flex;flex-direction:column}
+.bk-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;padding-block:8px;border-bottom:1px solid var(--line)}
+.bk-row:last-child{border-bottom:0}
+.bk-row.cur .bk-name::before{content:"● ";color:var(--accent)}
+.bk-name{font-weight:600;flex:1 1 140px;min-width:0;overflow-wrap:anywhere}
+.bk-meta{font:500 .8rem var(--f-mono);color:var(--muted)}
+.bk-row button{padding:4px 10px;border:1px solid var(--line);background:var(--panel)}
 .rowh{cursor:pointer} .rowh rect{fill:var(--panel);stroke:var(--line);stroke-width:1.2}
 .rowh:hover rect{stroke:var(--accent);stroke-width:2} .rowh text{font:600 11px var(--f-body);fill:var(--ink);text-anchor:middle;dominant-baseline:central;pointer-events:none}
 .hint .acts{display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:8px;vertical-align:middle}
@@ -270,6 +277,17 @@ details.card>summary::before{content:"▸";color:var(--muted)} details[open].car
   </div>
 
   <div class="lower">
+    <section class="card" id="bankCard">
+      <div class="row" style="justify-content:space-between;align-items:baseline"><h2>Mis bancos</h2><span class="note" id="bk-where"></span></div>
+      <div class="row">
+        <div class="field" style="flex:1 1 180px"><label for="bk-name">Nombre del banco</label><input type="text" id="bk-name" placeholder="Monopatín 10S3P" autocomplete="off"></div>
+        <button class="btn primary" id="bk-save">Guardar</button>
+        <button class="btn" id="bk-saveas">Guardar como nuevo</button>
+        <button class="btn" id="bk-new">Nuevo</button>
+      </div>
+      <p class="note" id="bk-status"></p>
+      <div class="bk-list" id="bk-list"></div>
+    </section>
     <section class="card">
       <h2>Análisis</h2>
       <ul class="status" id="status"></ul>
@@ -312,7 +330,11 @@ details.card>summary::before{content:"▸";color:var(--muted)} details[open].car
   </div>
 
   <div class="tab" id="tab-cells" hidden>
-    <p class="syncnote" id="syncNote"></p>
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <p class="syncnote" id="syncNote"></p>
+      <div class="row" style="align-items:center"><span class="note">Respaldo de celdas, criterios y bancos:</span><button class="btn" id="bkpOut">Descargar respaldo</button><button class="btn" id="bkpIn">Restaurar respaldo</button><input type="file" id="bkpFile" accept=".json,application/json" hidden></div>
+    </div>
+    <p class="msg" id="bkpMsg" aria-live="polite"></p>
     <div class="statrow" id="statRow"></div>
     <div class="inv-grid">
       <section class="card" id="formCard">
@@ -441,7 +463,9 @@ function generate(s,p,keep){
   return st;
 }
 function load(){try{const t=localStorage.getItem(KEY);if(t){const o=JSON.parse(t);if(o&&o.cells)return Object.assign(defaults(),o);}}catch(e){}return generate(4,3);}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+let lastLocal='';
+function save(){const t=JSON.stringify(S);if(t===lastLocal)return;lastLocal=t;
+  try{localStorage.setItem(KEY,t);localStorage.setItem(KEY+'-t',String(Date.now()));}catch(e){}scheduleCloud();}
 function snap(){hist.push(JSON.stringify(S));if(hist.length>150)hist.shift();}
 function undo(){if(!hist.length)return;S=JSON.parse(hist.pop());pending=null;syncInputs();render();}
 
@@ -711,8 +735,72 @@ function gen(s,p){s=Math.max(1,Math.min(30,s|0));p=Math.max(1,Math.min(20,p|0));
 document.getElementById('gen').addEventListener('click',()=>gen(parseInt(document.getElementById('genS').value),parseInt(document.getElementById('genP').value)));
 document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>{const [s,p]=b.dataset.preset.split(',').map(Number);document.getElementById('genS').value=s;document.getElementById('genP').value=p;gen(s,p);}));
 
+/* ---------- Mis bancos ---------- */
+const BKEY='bancos18650-banks';
+let bdb=null,banks=new Map(),curBank=null,draftT=null,lastDraft='',bankErrMsg='';
+try{curBank=localStorage.getItem(KEY+'-cur')||null;}catch(e){}
+const $b=id=>document.getElementById(id);
+const escB=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function setCur(id){curBank=id;try{id?localStorage.setItem(KEY+'-cur',id):localStorage.removeItem(KEY+'-cur');}catch(e){}}
+function bankSummary(){const A=analyze();const p=A.counts.length?Math.max(...A.counts):0;return (A.series?A.series+'S'+p+'P · ':'')+A.cells.length+' celdas';}
+function saveBanksLocal(){try{localStorage.setItem(BKEY,JSON.stringify(Object.fromEntries(banks)));}catch(e){bankErrMsg='No se pudo guardar en este navegador.';}}
+function bankErr(e){bankErrMsg=e&&e.code==='quota_exceeded'?'Se llenó el espacio de guardado: elimina bancos que no uses.':'No se pudo guardar en la nube. Revisa la conexión; el banco sigue guardado en este navegador.';renderBanks();}
+function persistBank(id,name){const b={name:name||bankSummary(),state:JSON.stringify(S),summary:bankSummary(),updated:new Date().toISOString()};
+  banks.set(id,b);bankErrMsg='';if(bdb)bdb.doc('banks/'+id).set(b).catch(bankErr);saveBanksLocal();renderBanks();}
+function scheduleCloud(){clearTimeout(draftT);draftT=setTimeout(()=>{const t=JSON.stringify(S);if(t===lastDraft)return;lastDraft=t;
+  if(curBank&&banks.has(curBank))persistBank(curBank,banks.get(curBank).name);
+  if(bdb)bdb.doc('config/draft').set({state:t,bank:curBank||'',updated:new Date().toISOString()}).catch(bankErr);},1200);}
+function openState(str){try{const o=JSON.parse(str);if(o&&o.cells){S=Object.assign(defaults(),o);return true;}}catch(e){}return false;}
+const fmtDate=iso=>{const d=new Date(iso);return isNaN(d)?'':d.toLocaleString('es-CO',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});};
+let delArm=null;
+function renderBanks(){
+  const list=[...banks].sort((a,b)=>String(b[1].updated).localeCompare(String(a[1].updated)));
+  $b('bk-where').textContent=bdb?'Guardado en la nube':'Guardado en este navegador';
+  const cur=curBank&&banks.get(curBank);
+  if(document.activeElement!==$b('bk-name'))$b('bk-name').value=cur?cur.name:($b('bk-name').value||'');
+  $b('bk-status').innerHTML=bankErrMsg?`<span style="color:var(--err)">${escB(bankErrMsg)}</span>`:
+    cur?`Abierto: <strong>${escB(cur.name)}</strong>. Los cambios se guardan solos.`:'Este diseño todavía no está en Mis bancos: ponle nombre y presiona Guardar.';
+  $b('bk-list').innerHTML=list.length?list.map(([id,b])=>`<div class="bk-row${id===curBank?' cur':''}"><span class="bk-name">${escB(b.name)}</span><span class="bk-meta">${escB(b.summary||'')} · ${fmtDate(b.updated)}</span>
+    <span class="row" style="gap:6px">${id===curBank?'':`<button data-bk-open="${id}">Abrir</button>`}<button data-bk-del="${id}">${delArm===id?'Confirmar eliminar':'Eliminar'}</button></span></div>`).join('')
+    :'<p class="note">Aún no tienes bancos guardados.</p>';
+}
+$b('bk-save').addEventListener('click',()=>{const name=$b('bk-name').value.trim()||bankSummary();
+  if(!curBank||!banks.has(curBank))setCur('b'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));persistBank(curBank,name);lastDraft='';scheduleCloud();});
+$b('bk-saveas').addEventListener('click',()=>{let name=$b('bk-name').value.trim()||bankSummary();
+  if(curBank&&banks.get(curBank)&&banks.get(curBank).name===name)name+=' (copia)';
+  setCur('b'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));$b('bk-name').value=name;persistBank(curBank,name);});
+$b('bk-new').addEventListener('click',()=>{snap();setCur(null);$b('bk-name').value='';
+  S=generate(4,3,{cap:S.cap,vnom:S.vnom,vmax:S.vmax,vmin:S.vmin,imax:S.imax,mirror:S.mirror});pending=null;sel=null;syncInputs();render();renderBanks();});
+$b('bk-list').addEventListener('click',e=>{const o=e.target.closest('[data-bk-open]'),d=e.target.closest('[data-bk-del]');
+  if(o){const b=banks.get(o.dataset.bkOpen);if(b&&(snap(),openState(b.state))){setCur(o.dataset.bkOpen);lastDraft=b.state;pending=null;sel=null;hist=[];syncInputs();render();renderBanks();}}
+  if(d){const id=d.dataset.bkDel;if(delArm!==id){delArm=id;renderBanks();setTimeout(()=>{if(delArm===id){delArm=null;renderBanks();}},3500);return;}
+    delArm=null;banks.delete(id);if(bdb)bdb.doc('banks/'+id).delete().catch(bankErr);saveBanksLocal();if(curBank===id)setCur(null);renderBanks();}});
+window.__bankApi={
+  all:()=>Object.fromEntries(banks),
+  draft:()=>JSON.stringify(S),
+  importAll:(obj)=>{let n=0;for(const [id,b] of Object.entries(obj||{})){if(!b||typeof b.state!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(id))continue;
+    const v={name:String(b.name||'Banco'),state:b.state,summary:String(b.summary||''),updated:String(b.updated||new Date().toISOString())};banks.set(id,v);if(bdb)bdb.doc('banks/'+id).set(v).catch(bankErr);n++;}
+    saveBanksLocal();renderBanks();return n;}
+};
+window.addEventListener('taller:pack',e=>{setCur(null);$b('bk-name').value=`${e.detail.S}S${e.detail.P}P ${new Date().toLocaleDateString('es-CO',{day:'2-digit',month:'short'})}`;renderBanks();});
+async function initBanks(){
+  try{const o=JSON.parse(localStorage.getItem(BKEY)||'{}');banks=new Map(Object.entries(o));}catch(e){}
+  renderBanks();
+  let p=null;try{p=window.claude&&window.claude.use?window.claude.use('db'):null;}catch(e){}
+  bdb=p?await p.catch(()=>null):null;
+  if(!bdb){renderBanks();return;}
+  let first=true;
+  bdb.doc('config/draft').onSnapshot(sn=>{if(!first)return;first=false;if(!sn.exists)return;const d=sn.data();
+    let loc=0;try{loc=+localStorage.getItem(KEY+'-t')||0;}catch(e){}
+    if((Date.parse(d.updated)||0)>loc&&d.state&&d.state!==JSON.stringify(S)&&openState(d.state)){setCur(d.bank||null);lastDraft=d.state;pending=null;sel=null;syncInputs();render();renderBanks();}},()=>{});
+  bdb.collection('banks').onSnapshot(sn=>{const m=new Map(sn.docs.map(d=>[d.id,d.data()]));
+    for(const [id,b] of banks)if(!m.has(id)&&!sn.metadata.fromCache){bdb.doc('banks/'+id).set(b).catch(()=>{});m.set(id,b);}
+    banks=m;saveBanksLocal();renderBanks();},()=>{});
+}
+
 S=load();if(S.cells.length!==N())S.cells=Array(N()).fill(null).map((_,i)=>S.cells[i]||null);
-syncInputs();render();
+lastLocal=JSON.stringify(S);
+syncInputs();render();initBanks();
 })();
 </script>
 
@@ -1035,6 +1123,31 @@ function renderFamilies(){
 ['m-S','m-P','m-allow','m-sel','m-pend','m-tol'].forEach(id=>$(id).addEventListener('change',()=>{
   mt.S=parseInt($('m-S').value)||1;mt.P=parseInt($('m-P').value)||1;mt.allow=$('m-allow').value;mt.sel=$('m-sel').value;mt.pend=$('m-pend').checked;mt.tol=+$('m-tol').value;saveUI();renderMatch();}));
 $('m-lote').addEventListener('change',e=>{mt.lote=e.target.value;saveUI();renderMatch();});
+
+/* ---------- Respaldo ---------- */
+let bkpT=null;function bmsg(t){$('bkpMsg').textContent=t;clearTimeout(bkpT);bkpT=setTimeout(()=>$('bkpMsg').textContent='',6000);}
+async function offerFile(name,text){
+  let dl=null;try{dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;}catch(e){}
+  if(dl){try{await dl.save({filename:name,data:text});return 'ok';}catch(e){return e&&e.code==='declined'?'declined':'fail';}}
+  try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'application/json'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);return 'ok';}catch(e){return 'fail';}}
+$('bkpOut').addEventListener('click',async()=>{
+  const data={app:'battery-helper',version:1,exported:new Date().toISOString(),cells:Object.fromEntries(cells),crit:C,lots,
+    banks:window.__bankApi?window.__bankApi.all():{},draft:window.__bankApi?window.__bankApi.draft():null};
+  const d=new Date(),name=`battery-helper-respaldo-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.json`;
+  const r=await offerFile(name,JSON.stringify(data,null,1));
+  bmsg(r==='ok'?`Respaldo listo: ${cells.size} celdas y ${Object.keys(data.banks).length} bancos.`:r==='declined'?'Descarga cancelada.':'No se pudo descargar el respaldo en esta vista. Usa "Copiar CSV" para las celdas.');});
+$('bkpIn').addEventListener('click',()=>{if(readOnly){bmsg('No tienes permiso para modificar estos datos.');return;}$('bkpFile').value='';$('bkpFile').click();});
+$('bkpFile').addEventListener('change',async e=>{const f=e.target.files&&e.target.files[0];if(!f)return;
+  let o=null;try{o=JSON.parse(await f.text());}catch(err){}
+  if(!o||o.app!=='battery-helper'||typeof o.cells!=='object'){bmsg('Ese archivo no es un respaldo de Battery Helper.');return;}
+  let n=0;for(const [k,r] of Object.entries(o.cells||{})){if(!r||typeof r!=='object'||!/^[A-Za-z0-9_-]{1,80}$/.test(k))continue;
+    const rec={};['code','lote','notes','created','updated','banco'].forEach(x=>{if(r[x]!=null)rec[x]=String(r[x]);});
+    FN.forEach(x=>rec[x]=num(r[x]));FB.forEach(x=>rec[x]=!!r[x]);put(k,rec,true);n++;}
+  if(o.crit&&typeof o.crit==='object'){for(const k in DEF_C){if(o.crit[k]!=null)C[k]=typeof DEF_C[k]==='boolean'?!!o.crit[k]:(num(o.crit[k])??DEF_C[k]);}}
+  if(o.lots&&typeof o.lots==='object')for(const k in o.lots){const v=num(o.lots[k]);if(v)lots[k]=v;}
+  saveConfig();syncCrit();renderCells();
+  const nb=window.__bankApi&&o.banks?window.__bankApi.importAll(o.banks):0;
+  bmsg(`Restaurado: ${n} celdas y ${nb} bancos. Lo que ya tenías con el mismo ID se reemplazó; lo demás se conservó.`);});
 
 /* ---------- Pestañas ---------- */
 function switchTab(t){tab=t;['design','cells','match'].forEach(n=>$('tab-'+n).hidden=n!==t);

@@ -27,4 +27,9 @@ Herramienta web de un solo archivo (`index.html`) para diseñar y armar bancos d
 Abre `index.html` en el navegador. No necesita instalación ni servidor.
 También se puede publicar con GitHub Pages (Settings → Pages → rama `main`, carpeta raíz).
 
-Fuera de Claude, los datos se guardan en el `localStorage` del navegador. Usa "Copiar CSV" para respaldar el inventario.
+## Guardado
+
+- **Mis bancos**: guarda varios diseños con nombre; el banco abierto se actualiza solo mientras trabajas.
+- Las celdas, su clasificación y los criterios se guardan al instante.
+- Abierta como artifact en Claude, todo se guarda en la nube de la cuenta. Abierta desde este repositorio o como archivo, se guarda en el `localStorage` de ese navegador.
+- **Descargar respaldo / Restaurar respaldo** (pestaña Celdas) exporta e importa todo en un `.json`: celdas, criterios y bancos. Sirve para pasar datos entre la versión de Claude y la de GitHub, o como copia de seguridad.
